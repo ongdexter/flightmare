@@ -1,6 +1,8 @@
 FROM ubuntu:18.04
+RUN rm /bin/sh && ln -s /bin/bash /bin/sh
 
 ENV DEBIAN_FRONTEND=noninteractive 
+ENV FLIGHTMARE_PATH=/home/flightmare 
 
 # Installing some essential system packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,10 +16,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
    libzmqpp-dev \
    libopencv-dev \
    gnupg2 \
+   curl\
    && rm -rf /var/lib/apt/lists/*
 
+RUN pip3 install --upgrade pip
+
 RUN /bin/bash -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list' && \
-    apt-key adv --keyserver 'hkp://keyserver.ubuntu.com:80' --recv-key C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654 
+    curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add -
 
 # Installing ROS  Melodic
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,10 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Installing catkin tools
 RUN apt-get update && apt-get install -y python3-setuptools && pip3 install catkin-tools 
 
-RUN /bin/bash cd /home && git clone https://github.com/uzh-rpg/flightmare.git \
-    && echo "export FLIGHTMARE_PATH=/home/flightmare" >> ~/.bashrc
-    && source ~/.bashrc
+RUN cd /home && git clone https://github.com/ongdexter/flightmare.git \
+    && export FLIGHTMARE_PATH=/home/flightmare 
 
-RUN /bin/bash cd /home/flightmare/flightlib && pip3 install . \
-    && cd /home/flightmare/flightrl && pip3 install . \
-    && 
+RUN cd /home/flightmare/flightlib && pip3 install . \
+    && cd /home/flightmare/flightrl && pip3 install . 
