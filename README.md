@@ -1,3 +1,9 @@
+# Docker with WSL2
+## Build docker image
+`docker build --tag flightmare -f Dockerfile .`
+## Run docker image
+`docker run -v /run/desktop/mnt/host/wslg/.X11-unix:/tmp/.X11-unix -v /run/desktop/mnt/host/wslg:/mnt/wslg -e DISPLAY=:0 -e WAYLAND_DISPLAY=wayland-0 -e XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir -e PULSE_SERVER=/mnt/wslg/PulseServer --gpus all -it --rm -v C:\flightmare:/home/flightmare flightmare`
+
 # Flightmare - 左青龙
 
 ![Build Status](https://github.com/uzh-rpg/flightmare/workflows/CPP_CI/badge.svg) ![clang format](https://github.com/uzh-rpg/flightmare/workflows/clang_format/badge.svg)
