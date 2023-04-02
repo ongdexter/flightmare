@@ -40,4 +40,4 @@ RUN cd /home/flightmare-ros/flightlib && pip3 install . \
 RUN cd /home && git clone https://github.com/ongdexter/flightmare.git flightmare-pip \
     && pip3 install tensorflow-gpu==1.14 \
     && pip3 install scikit-build \
-    && cd /home/flightmare-pip && pip3 install .
+    && cd /home/flightmare-pip/flightrl && pip3 install .
