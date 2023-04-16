@@ -3,6 +3,7 @@ project(flightros)
 cmake_minimum_required(VERSION 3.0.0)
 
 find_package(catkin_simple REQUIRED)
+find_package(catkin REQUIRED COMPONENTS octomap_ros octomap_msgs)
 
 find_package(OpenCV REQUIRED)
 
@@ -121,7 +122,7 @@ endif()
 
 catkin_package(
 LIBRARIES
-CATKIN_DEPENDS
+CATKIN_DEPENDS octomap_ros octomap_msgs
 )
 
 cs_add_executable(racing
@@ -143,6 +144,19 @@ cs_add_executable(camera
 )
 
 target_link_libraries(camera
+${catkin_LIBRARIES}
+${OpenCV_LIBRARIES}
+stdc++fs
+zmq
+zmqpp
+)
+
+# exploration
+cs_add_executable(exploration_datagen
+    src/exploration/datagen.cpp
+)
+
+target_link_libraries(exploration_datagen
 ${catkin_LIBRARIES}
 ${OpenCV_LIBRARIES}
 stdc++fs
