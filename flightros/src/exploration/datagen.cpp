@@ -4,13 +4,14 @@
 #include <image_transport/image_transport.h>
 #include <ros/ros.h>
 
-// flightlib
+#include <geometry_msgs/PoseStamped.h>
 #include <octomap/ColorOcTree.h>
 #include <octomap/octomap.h>
 #include <octomap_msgs/conversions.h>
 #include <octomap_msgs/Octomap.h>
 #include <octomap_msgs/GetOctomap.h>
 
+// flightlib
 #include "flightlib/bridges/unity_bridge.hpp"
 #include "flightlib/bridges/unity_message_types.hpp"
 #include "flightlib/common/quad_state.hpp"
@@ -69,6 +70,7 @@ int main(int argc, char* argv[]) {
   image_transport::Publisher depth_pub3;
   image_transport::Publisher depth_pub4;
   image_transport::Publisher rgb_pub;
+  ros::Publisher pose_pub = nh.advertise<geometry_msgs::PoseStamped>("pose_topic", 10);
   ros::Publisher octomap_pub = nh.advertise<octomap_msgs::Octomap>("occupancy",1);
 
   // unity quadrotor
@@ -116,6 +118,7 @@ int main(int argc, char* argv[]) {
   // initialization
   quad_state.setZero();
   quad_ptr->reset(quad_state);
+  quad_state.x[QS::POSZ] = 1.0;
 
   // connect unity
   unity_bridge_ptr->addQuadrotor(quad_ptr);
@@ -126,7 +129,7 @@ int main(int argc, char* argv[]) {
 
   FrameID frame_id = 0;
   while (ros::ok() && unity_ready) {
-    quad_state.x[QS::POSY] += 0.2;
+    quad_state.x[QS::POSY] += 0.1;
     Eigen::Vector3f T_world_body = quad_state.p;
 
     quad_ptr->setState(quad_state);
@@ -203,8 +206,17 @@ int main(int argc, char* argv[]) {
     bmap_msg.header.stamp = timestamp;
     octomap_pub.publish(bmap_msg);
 
+    // pose
+    geometry_msgs::PoseStamped pose_msg;
+    pose_msg.header.stamp = timestamp;
+    pose_msg.header.frame_id = "map"; // set the frame ID for the pose
+    pose_msg.pose.position.x = quad_state.x[QS::POSX];
+    pose_msg.pose.position.y = quad_state.x[QS::POSY];
+    pose_msg.pose.position.z = quad_state.x[QS::POSZ] + 0.3; // offset to sensor pose
+    pose_pub.publish(pose_msg);
+
     // save octomap
-    // tree.writeBinary("/home/odexter/fm_logs/" + std::to_string(frame_id) + ".bt");
+    tree.writeBinary("/home/odexter/fm_logs/" + std::to_string(frame_id) + ".bt");
 
     frame_id += 1;
   }
