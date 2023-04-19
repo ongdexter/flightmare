@@ -26,8 +26,9 @@ enum UnityScene {
   GARAGE = 2,
   TUNELS = 4,
   NATUREFOREST = 3,
+  PLANE = 5,
   // total number of environment
-  SceneNum = 5
+  SceneNum = 6
 };
 
 // Unity Camera, should not be used alone.
