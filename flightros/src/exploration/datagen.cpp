@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <fstream>
 
 // ros
 #include <cv_bridge/cv_bridge.h>
@@ -21,8 +23,13 @@
 
 using namespace flightlib;
 
-void depthToPointCloud(const cv::Mat& depth_map, const cv::Mat& K,
-                       std::vector<Eigen::Vector3d>& cloud) {
+void depthToPointCloud(const cv::Mat& depth_map,
+                       const cv::Mat& K,
+                       octomap::Pointcloud& cloud,
+                       const Eigen::Matrix3f& R_body_cam,
+                       const Eigen::Vector3f& T_body_cam,
+                       const Eigen::Vector3f& T_world_body)
+{
   int width = depth_map.cols;
   int height = depth_map.rows;
 
@@ -31,15 +38,16 @@ void depthToPointCloud(const cv::Mat& depth_map, const cv::Mat& K,
   float cx = K.at<float>(0, 2);
   float cy = K.at<float>(1, 2);
 
-  cloud.resize(width * height);
-
   for (int v = 0; v < height; ++v) {
     for (int u = 0; u < width; ++u) {
       float Z = depth_map.at<float>(v, u);
-      if (Z > 0) {
+      if (Z > 0 && Z < 20) {
         float X = (u - cx) * Z / fx;
         float Y = (v - cy) * Z / fy;
-        cloud[v * width + u] = Eigen::Vector3d(X, Z, -Y); // flip axes to body frame
+        // transform to world frame
+        Eigen::Vector3f point(X, Z, -Y);
+        Eigen::Vector3f point_tf = R_body_cam * point.cast<float>() + T_body_cam + T_world_body;
+        cloud.push_back(octomap::point3d(point_tf[0], point_tf[1], point_tf[2])); // flip axes to body frame
       }
     }
   }
@@ -47,19 +55,44 @@ void depthToPointCloud(const cv::Mat& depth_map, const cv::Mat& K,
 
 void addCamera(std::shared_ptr<Quadrotor>& quad,
                std::shared_ptr<RGBCamera>& camera, Vector<3> B_r_BC,
-               Matrix<3, 3> R_BC) {
+               Matrix<3, 3> R_BC)
+{
   camera->setFOV(90);
   camera->setWidth(160);
   camera->setHeight(90);
   camera->setRelPose(B_r_BC, R_BC);
-  camera->setPostProcesscing(
-    std::vector<bool>{true, true, true});  // depth, segmentation, optical flow
+  camera->setPostProcesscing(std::vector<bool>{true, false, false});  // depth, segmentation, optical flow
   quad->addRGBCamera(camera);
 }
 
-int main(int argc, char* argv[]) {
+void octreeToVoxelGrid(const octomap::OcTree& octree, std::vector<std::vector<std::vector<int>>>& voxel_grid)
+{
+    // loop over all nodes in the octree
+    int resolution = 0.2;
+    int dim = 100 / resolution;
+    for (octomap::OcTree::leaf_iterator it = octree.begin_leafs(), end = octree.end_leafs(); it != end; ++it) {
+        // Get the coordinate of this leaf node
+        octomap::point3d coord = it.getCoordinate();
+        std::cout << "Coordinate: (" << coord.x() << ", " << coord.y() << ", " << coord.z() << ")" << std::endl;
+    
+        int x = (coord.x() / resolution) + (dim / 2);
+        int y = (coord.y() / resolution) + (dim / 2);
+        int z = (coord.z() / resolution) + (dim / 2);
+        std::cout << x << " " << y << " " << z << std::endl;
+
+        // set occupancy
+        if (octree.isNodeOccupied(*it)) {
+            voxel_grid[x][y][z] = 2;     // occupied cell
+        } else {
+            voxel_grid[x][y][z] = 1;    // free cell
+        }
+    }
+}
+
+int main(int argc, char* argv[])
+{
   // initialize ROS
-  ros::init(argc, argv, "camera_example");
+  ros::init(argc, argv, "exploration_datagen");
   ros::NodeHandle nh("");
   ros::NodeHandle pnh("~");
   ros::Rate(50.0);
@@ -88,7 +121,7 @@ int main(int argc, char* argv[]) {
 
   // Flightmare(Unity3D)
   std::shared_ptr<UnityBridge> unity_bridge_ptr = UnityBridge::getInstance();
-  SceneID scene_id{UnityScene::WAREHOUSE};
+  SceneID scene_id{UnityScene::PLANE};
   bool unity_ready{false};
 
   // initialize publishers
@@ -115,6 +148,17 @@ int main(int argc, char* argv[]) {
   addCamera(quad_ptr, rgb_camera3, T_body_cam, R_body_cam3);
   addCamera(quad_ptr, rgb_camera4, T_body_cam, R_body_cam4);
 
+  // add objects
+  std::shared_ptr<StaticObject> cylinder1 = std::make_shared<StaticObject>("cylinder1", "cylinder");
+  cylinder1->setPosition(Eigen::Vector3f(-5, 5, 0));
+  cylinder1->setSize(Eigen::Vector3f(2.0, 2.0, 10.0));
+  unity_bridge_ptr->addStaticObject(cylinder1);
+
+  std::shared_ptr<StaticObject> cylinder2 = std::make_shared<StaticObject>("cylinder2", "cylinder");
+  cylinder2->setPosition(Eigen::Vector3f(5, 5, 0));
+  cylinder2->setSize(Eigen::Vector3f(2.0, 2.0, 10.0));
+  unity_bridge_ptr->addStaticObject(cylinder2);
+
   // initialization
   quad_state.setZero();
   quad_ptr->reset(quad_state);
@@ -122,11 +166,16 @@ int main(int argc, char* argv[]) {
 
   // connect unity
   unity_bridge_ptr->addQuadrotor(quad_ptr);
+
   unity_ready = unity_bridge_ptr->connectUnity(scene_id);
 
   // occupancy map
   octomap::OcTree tree(0.2);
 
+  // sleep for a bit
+  ros::Duration(1.0).sleep();
+
+  // run loop
   FrameID frame_id = 0;
   while (ros::ok() && unity_ready) {
     quad_state.x[QS::POSY] += 0.1;
@@ -150,33 +199,16 @@ int main(int argc, char* argv[]) {
     rgb_camera1->getRGBImage(rgb1);
 
     // convert depth maps to point clouds
-    std::vector<Eigen::Vector3d> cloud1, cloud2, cloud3, cloud4;
-    depthToPointCloud(depth_map1, K, cloud1);
-    depthToPointCloud(depth_map2, K, cloud2);
-    depthToPointCloud(depth_map3, K, cloud3);
-    depthToPointCloud(depth_map4, K, cloud4);
+    octomap::Pointcloud cloud;
+    depthToPointCloud(depth_map1, K, cloud, R_body_cam1, T_body_cam, T_world_body);
+    depthToPointCloud(depth_map2, K, cloud, R_body_cam2, T_body_cam, T_world_body);
+    depthToPointCloud(depth_map3, K, cloud, R_body_cam3, T_body_cam, T_world_body);
+    depthToPointCloud(depth_map4, K, cloud, R_body_cam4, T_body_cam, T_world_body);
 
     // octomap
-    for (const auto& point : cloud1)
-    {
-        auto point_tf = R_body_cam1 * point.cast<float>() + T_body_cam + T_world_body;
-        tree.updateNode(octomap::point3d(point_tf[0], point_tf[1], point_tf[2]), true);
-    }
-    for (const auto& point : cloud2)
-    {
-        auto point_tf = R_body_cam2 * point.cast<float>() + T_body_cam + T_world_body;;
-        tree.updateNode(octomap::point3d(point_tf[0], point_tf[1], point_tf[2]), true);
-    }
-    for (const auto& point : cloud3)
-    {
-        auto point_tf = R_body_cam3 * point.cast<float>() + T_body_cam + T_world_body;;
-        tree.updateNode(octomap::point3d(point_tf[0], point_tf[1], point_tf[2]), true);
-    }
-    for (const auto& point : cloud4)
-    {
-        auto point_tf = R_body_cam4 * point.cast<float>() + T_body_cam + T_world_body;;
-        tree.updateNode(octomap::point3d(point_tf[0], point_tf[1], point_tf[2]), true);
-    }
+    octomap::point3d octopose = octomap::point3d(T_world_body[0], T_world_body[1], T_world_body[2] + 0.3); // this is an excellent pun
+    tree.insertPointCloud(cloud, octopose);
+    // tree.updateInnerOccupancy();
 
     // publish
     sensor_msgs::ImagePtr depth_msg =
@@ -216,8 +248,55 @@ int main(int argc, char* argv[]) {
     pose_pub.publish(pose_msg);
 
     // save octomap
-    tree.writeBinary("/home/odexter/fm_logs/" + std::to_string(frame_id) + ".bt");
+    int dim = 500;
+    // std::vector<std::vector<std::vector<int>>> voxel_grid(dim, std::vector<std::vector<int>>(dim, std::vector<int>(dim, 0)));
+    // octreeToVoxelGrid(tree, voxel_grid);
+    std::vector<std::vector<std::vector<int>>> voxel_compressed(dim, std::vector<std::vector<int>>(dim, std::vector<int>(4, -1)));
+    // loop over all nodes in the octree
+    float resolution = 0.2;
+    for (octomap::OcTree::leaf_iterator it = tree.begin_leafs(), end = tree.end_leafs(); it != end; ++it)
+    {
+        // get the coordinate of this leaf node
+        octomap::point3d coord = it.getCoordinate();
+        
+        // std::cout << "Coordinate: (" << coord.x() << ", " << coord.y() << ", " << coord.z() << ")" << std::endl;
+    
+        int x = (coord.x() / resolution) + (dim / 2);
+        int y = (coord.y() / resolution) + (dim / 2);
+        int z = (coord.z() / resolution) + (dim / 2);
 
+        // compute z_max, z_min, z_avg, count for each x and y
+        if (voxel_compressed[x][y][3] == -1) 
+        {
+          voxel_compressed[x][y] = {0, 0, 0, 0};
+          if (tree.isNodeOccupied(*it)) {
+            voxel_compressed[x][y][0] = coord.z();
+            voxel_compressed[x][y][1] = coord.z();
+            voxel_compressed[x][y][2] = coord.z();
+            voxel_compressed[x][y][3]++;
+          }
+        }
+        else if (tree.isNodeOccupied(*it)) 
+        {
+          int count = voxel_compressed[x][y][3];
+          voxel_compressed[x][y][0] = std::max(static_cast<float>(voxel_compressed[x][y][0]), coord.z());
+          voxel_compressed[x][y][1] = std::min(static_cast<float>(voxel_compressed[x][y][1]), coord.z());
+          voxel_compressed[x][y][2] = (voxel_compressed[x][y][2] * count + coord.z() ) / (count + 1);
+          voxel_compressed[x][y][3]++;
+        }
+    }
+
+    // write to file
+    std::string file_idx = std::string(6 - std::min(6, static_cast<int>(std::to_string(frame_id).length())), '0') + std::to_string(frame_id);
+    std::ofstream outFile("/home/odexter/fm_logs/" + file_idx + ".csv");
+    for (int i = 0; i < dim; i++) {
+      for (int j = 0; j < dim; j++) {
+        outFile << i << "," << j << "," << voxel_compressed[i][j][0] << "," << voxel_compressed[i][j][1] << "," << voxel_compressed[i][j][2] << "\n";
+      }
+      outFile << std::endl;
+    }
+    outFile.close();
+    
     frame_id += 1;
   }
 
