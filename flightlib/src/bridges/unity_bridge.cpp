@@ -196,7 +196,33 @@ bool UnityBridge::addStaticObject(std::shared_ptr<StaticObject> static_object) {
   static_objects_.push_back(static_object);
   settings_.objects.push_back(object_t);
   pub_msg_.objects.push_back(object_t);
-  //
+  
+  return true;
+}
+
+bool UnityBridge::removeStaticObject(std::shared_ptr<StaticObject> static_object)
+{
+  // erase based on id
+  std::string object_id = static_object->getID();
+  static_objects_.erase(std::remove_if(static_objects_.begin(), static_objects_.end(),
+    [object_id](std::shared_ptr<StaticObject> obj) { return obj->getID() == object_id; }),
+    static_objects_.end());
+  settings_.objects.erase(std::remove_if(settings_.objects.begin(), settings_.objects.end(),
+    [object_id](Object_t obj) { return obj.ID == object_id; }),
+    settings_.objects.end());
+  pub_msg_.objects.erase(std::remove_if(pub_msg_.objects.begin(), pub_msg_.objects.end(),
+    [object_id](Object_t obj) { return obj.ID == object_id; }),
+    pub_msg_.objects.end());
+
+  return true;
+}
+
+bool UnityBridge::clearStaticObjects()
+{
+  static_objects_.clear();
+  settings_.objects.clear();
+  pub_msg_.objects.clear();
+
   return true;
 }
 

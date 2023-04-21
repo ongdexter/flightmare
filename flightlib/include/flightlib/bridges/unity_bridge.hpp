@@ -56,6 +56,8 @@ class UnityBridge {
   bool addQuadrotor(std::shared_ptr<Quadrotor> quad);
   bool addCamera(std::shared_ptr<UnityCamera> unity_camera);
   bool addStaticObject(std::shared_ptr<StaticObject> static_object);
+  bool removeStaticObject(std::shared_ptr<StaticObject> static_object);
+  bool clearStaticObjects();
 
   // public auxiliary functions
   inline void setPubPort(const std::string &pub_port) { pub_port_ = pub_port; };
